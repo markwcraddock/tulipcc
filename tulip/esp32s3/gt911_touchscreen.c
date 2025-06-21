@@ -6,7 +6,7 @@
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_rom_sys.h" // for ets_delay_us
+#include "esp_rom/ets_sys.h"
 
 #ifndef TDECK
 int16_t touch_x_delta = -2;
