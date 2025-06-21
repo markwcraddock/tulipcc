@@ -1,4 +1,4 @@
-#### Modified gt911 driver for Tdeck, created by ChatGPT and Mark Craddock ####
+// Modified gt911 driver for Tdeck, created by ChatGPT and Mark Craddock
 #include "display.h"
 #include "gt911_touchscreen.h"
 #include "pins.h"
@@ -6,9 +6,9 @@
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_rom_sys.h" // for ets_delay_us
 
 #ifndef TDECK
-// Default for my V4R11
 int16_t touch_x_delta = -2;
 int16_t touch_y_delta = -12;
 float touch_y_scale = 0.8f;
@@ -20,20 +20,19 @@ float touch_y_scale = 1.0f;
 
 esp_lcd_touch_handle_t tp;
 
-// Minimal GT911 reset mimicking the MicroPython logic
 static void gt911_reset(uint8_t reset_level, uint8_t int_level) {
     gpio_config_t rst_cfg = {
         .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = BIT64(TOUCH_RST)
+        .pin_bit_mask = (1ULL << TOUCH_RST)
     };
     gpio_config_t int_cfg = {
         .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = BIT64(TOUCH_INT)
+        .pin_bit_mask = (1ULL << TOUCH_INT)
     };
     gpio_config(&rst_cfg);
     gpio_config(&int_cfg);
 
-    gpio_set_level(TOUCH_INT, int_level);  // 0 = 0x14, 1 = 0x5D
+    gpio_set_level(TOUCH_INT, int_level);
     gpio_set_level(TOUCH_RST, 0);
     vTaskDelay(pdMS_TO_TICKS(10));
 
@@ -43,7 +42,7 @@ static void gt911_reset(uint8_t reset_level, uint8_t int_level) {
 
     gpio_config_t int_in = {
         .mode = GPIO_MODE_INPUT,
-        .pin_bit_mask = BIT64(TOUCH_INT)
+        .pin_bit_mask = (1ULL << TOUCH_INT)
     };
     gpio_config(&int_in);
     vTaskDelay(pdMS_TO_TICKS(50));
@@ -51,7 +50,6 @@ static void gt911_reset(uint8_t reset_level, uint8_t int_level) {
 
 esp_err_t touch_init(uint8_t alternate) {
     tp = NULL;
-
     esp_lcd_panel_io_handle_t io_handle = NULL;
 
     i2c_config_t i2c_conf = {
@@ -117,10 +115,9 @@ void run_gt911(void *param) {
     uint8_t touchscreen_ok = 0;
 
 #ifndef TDECK
-    delay_ms(2000);  // Older boards need more boot time
+    delay_ms(2000);
 #endif
 
-    // Try primary (0x5D), then fallback to 0x14
     if (touch_init(0) == ESP_OK) {
         fprintf(stderr, "touchscreen OK at 0x5D\n");
         touchscreen_ok = 1;
@@ -128,4 +125,38 @@ void run_gt911(void *param) {
         fprintf(stderr, "attempting fallback to 0x14\n");
         delay_ms(500);
         if (touch_init(1) == ESP_OK) {
-            fprintf(
+            fprintf(stderr, "touchscreen OK at 0x14\n");
+            touchscreen_ok = 1;
+        } else {
+            fprintf(stderr, "Touchscreen failed on both 0x5D and 0x14\n");
+        }
+    }
+
+    while (1) {
+        if (touchscreen_ok) {
+            esp_lcd_touch_read_data(tp);
+            if (esp_lcd_touch_get_coordinates(tp, touch_x, touch_y, touch_strength, &touch_cnt, 3)) {
+                for (uint8_t i = 0; i < touch_cnt; i++) {
+                    last_touch_x[i] = touch_x[i] + touch_x_delta;
+#ifdef TDECK
+                    last_touch_y[i] = ((V_RES - touch_y[i]) + touch_y_delta) * touch_y_scale;
+#else
+                    last_touch_y[i] = (touch_y[i] + touch_y_delta) * touch_y_scale;
+#endif
+                }
+                for (uint8_t i = touch_cnt; i < 3; i++) {
+                    last_touch_x[i] = -1;
+                    last_touch_y[i] = -1;
+                }
+                send_touch_to_micropython(last_touch_x[0], last_touch_y[0], 0);
+                gt911_held = 1;
+            } else {
+                if (gt911_held) {
+                    send_touch_to_micropython(last_touch_x[0], last_touch_y[0], 1);
+                    gt911_held = 0;
+                }
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
