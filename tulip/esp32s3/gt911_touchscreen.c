@@ -6,7 +6,8 @@
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_rom/ets_sys.h"
+#define ets_delay_us(us) vTaskDelay(pdMS_TO_TICKS((us) / 1000 + 1))
+
 
 #ifndef TDECK
 int16_t touch_x_delta = -2;
@@ -16,6 +17,7 @@ float touch_y_scale = 0.8f;
 int16_t touch_x_delta = 0;
 int16_t touch_y_delta = 0;
 float touch_y_scale = 1.0f;
+
 #endif
 
 esp_lcd_touch_handle_t tp;
